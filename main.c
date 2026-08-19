@@ -9,6 +9,7 @@
 #define MSYS2_ROOT "C:\\msys64"
 #define GCC_BIN_PATH "C:\\msys64\\ucrt64\\bin"
 #define CONFIG_FILE "flags.cfg"
+#define LOG_FILE "gccauto_log.txt"
 
 /* ---------- download ---------- */
 
@@ -44,6 +45,53 @@ int gcc_already_installed(void) {
     return 0;
 }
 
+/* ---------- run a command quietly, with a dot spinner instead of raw output ---------- */
+
+int run_command_with_spinner(const char* command) {
+    STARTUPINFOA si;
+    PROCESS_INFORMATION pi;
+    ZeroMemory(&si, sizeof(si));
+    si.cb = sizeof(si);
+    ZeroMemory(&pi, sizeof(pi));
+
+    SECURITY_ATTRIBUTES sa;
+    ZeroMemory(&sa, sizeof(sa));
+    sa.nLength = sizeof(sa);
+    sa.bInheritHandle = TRUE;
+
+    HANDLE hLog = CreateFileA(LOG_FILE, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                               &sa, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+
+    si.dwFlags |= STARTF_USESTDHANDLES;
+    si.hStdOutput = hLog;
+    si.hStdError = hLog;
+    si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+
+    char full_cmd[1200];
+    snprintf(full_cmd, sizeof(full_cmd), "cmd.exe /c %s", command);
+
+    BOOL ok = CreateProcessA(NULL, full_cmd, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi);
+    if (hLog != INVALID_HANDLE_VALUE) CloseHandle(hLog);
+
+    if (!ok) {
+        printf("\nCould not start command (error %lu)\n", GetLastError());
+        return -1;
+    }
+
+    while (WaitForSingleObject(pi.hProcess, 500) == WAIT_TIMEOUT) {
+        printf(".");
+        fflush(stdout);
+    }
+
+    DWORD exitCode = 1;
+    GetExitCodeProcess(pi.hProcess, &exitCode);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+
+    printf("\n");
+    return (int)exitCode;
+}
+
 int run_setup(void) {
     if (msys2_already_installed()) {
         printf("MSYS2 already found at %s, skipping installer.\n", MSYS2_ROOT);
@@ -55,25 +103,28 @@ int run_setup(void) {
         char cmd[512];
         snprintf(cmd, sizeof(cmd),
             "msys2-installer.exe install --confirm-command --root \"%s\"", MSYS2_ROOT);
-        printf("Installing MSYS2 silently...\n");
-        int result = system(cmd);
+        printf("Installing MSYS2");
+        int result = run_command_with_spinner(cmd);
         if (result != 0) {
-            printf("MSYS2 install failed (exit code %d)\n", result);
+            printf("MSYS2 install failed (exit code %d). See %s for details.\n", result, LOG_FILE);
             return 0;
         }
+        printf("MSYS2 installed.\n");
     }
 
     if (gcc_already_installed()) {
         printf("gcc toolchain already installed, skipping package install.\n");
     } else {
-        printf("Installing gcc toolchain via pacman (this can take a while)...\n");
+        printf("Installing gcc toolchain (this takes a few minutes)");
         char pacman_cmd[600];
         snprintf(pacman_cmd, sizeof(pacman_cmd),
             "\"\"%s\\usr\\bin\\bash.exe\" -lc \"pacman -S --noconfirm --needed base-devel mingw-w64-ucrt-x86_64-toolchain\"\"",
             MSYS2_ROOT);
-        int pacman_result = system(pacman_cmd);
+        int pacman_result = run_command_with_spinner(pacman_cmd);
         if (pacman_result != 0) {
-            printf("pacman step returned exit code %d - check output above.\n", pacman_result);
+            printf("pacman step returned exit code %d. See %s for details.\n", pacman_result, LOG_FILE);
+        } else {
+            printf("gcc toolchain installed.\n");
         }
     }
 
@@ -84,9 +135,11 @@ int run_setup(void) {
         "$p = [Environment]::GetEnvironmentVariable('Path','User'); "
         "if ($p -notlike '*%s*') { [Environment]::SetEnvironmentVariable('Path', $p + ';%s', 'User') }\"",
         GCC_BIN_PATH, GCC_BIN_PATH);
-    system(path_cmd);
+    run_command_with_spinner(path_cmd);
 
-    printf("Setup complete. Open a NEW terminal for PATH changes to take effect.\n");
+    printf("Setup complete.\n");
+    printf("'gccauto build' will work right away in this window.\n");
+    printf("Typing 'gcc' directly still needs a new terminal window (Windows limitation).\n");
     return 1;
 }
 
@@ -133,7 +186,21 @@ void config_clear(void) {
 
 /* ---------- build ---------- */
 
+void ensure_gcc_in_path(void) {
+    char current[4096];
+    DWORD len = GetEnvironmentVariableA("PATH", current, sizeof(current));
+    if (len == 0 || len >= sizeof(current)) return;
+
+    if (strstr(current, GCC_BIN_PATH) == NULL) {
+        char updated[4096 + 64];
+        snprintf(updated, sizeof(updated), "%s;%s", current, GCC_BIN_PATH);
+        SetEnvironmentVariableA("PATH", updated);
+    }
+}
+
 void build_file(const char* srcfile) {
+    ensure_gcc_in_path();
+
     char flags[512];
     load_flags(flags, sizeof(flags));
 

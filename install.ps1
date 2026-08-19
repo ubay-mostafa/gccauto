@@ -20,4 +20,9 @@ if ($currentPath -notlike "*$installDir*") {
     [Environment]::SetEnvironmentVariable("Path", "$currentPath;$installDir", "User")
 }
 
-Write-Host "Installed. Open a new terminal and run: gccauto setup"
+# Also update THIS session's PATH, so gccauto works right away without opening a new window
+if ($env:Path -notlike "*$installDir*") {
+    $env:Path += ";$installDir"
+}
+
+Write-Host "Installed. You can run 'gccauto setup' right now in this window."
