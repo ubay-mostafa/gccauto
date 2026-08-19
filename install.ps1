@@ -1,12 +1,12 @@
 # install.ps1
-# Downloads the pre-built gccauto.exe from your GitHub Release and adds it to PATH.
-# Others would run this with:
-#   irm https://raw.githubusercontent.com/<you>/<repo>/main/install.ps1 | iex
+# Downloads the pre-built gccauto.exe from the GitHub Release and adds it to PATH.
+# Others install it with:
+#   irm https://raw.githubusercontent.com/ubay-mostafa/gccauto/main/install.ps1 | iex
 
 $ErrorActionPreference = "Stop"
 
 $installDir = "$env:USERPROFILE\Documents\GCCAuto"
-$exeUrl     = "https://github.com/<you>/<repo>/releases/latest/download/gccauto.exe"
+$exeUrl     = "https://github.com/ubay-mostafa/gccauto/releases/latest/download/gccauto.exe"
 $exePath    = Join-Path $installDir "gccauto.exe"
 
 New-Item -ItemType Directory -Force -Path $installDir | Out-Null
